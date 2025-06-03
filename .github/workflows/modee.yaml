@@ -1,0 +1,44 @@
+name: Build ModemManager for BCM2711
+on: [workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout OpenWRT
+        uses: actions/checkout@v4
+        with:
+          repository: openwrt/openwrt
+          submodules: recursive
+    
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
+            gettext git libelf-dev libncurses-dev libssl-dev python3 rsync unzip wget
+    
+      - name: Configure OpenWRT for BCM2711
+        run: |
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          echo "CONFIG_TARGET_bcm27xx=y" >> .config
+          echo "CONFIG_TARGET_bcm27xx_bcm2711=y" >> .config
+          echo "CONFIG_PACKAGE_modemmanager=y" >> .config
+          echo "CONFIG_PACKAGE_libqmi=y" >> .config
+          echo "CONFIG_PACKAGE_libmbim=y" >> .config
+          echo "CONFIG_PACKAGE_luci-proto-qmi=y" >> .config
+          echo "CONFIG_PACKAGE_rpcd-mod-mbm=y" >> .config
+          make defconfig
+    
+      - name: Compile Packages
+        run: |
+          make -j$(nproc) package/libqmi/compile
+          make -j$(nproc) package/libmbim/compile
+          make -j$(nproc) package/modemmanager/compile
+          make -j$(nproc) package/luci-proto-qmi/compile
+          make -j$(nproc) package/rpcd-mod-mbm/compile
+    
+      - name: Upload IPK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: modemmanager-ipks
+          path: bin/packages/*/base/*.ipk
