@@ -10,44 +10,57 @@ jobs:
           repository: openwrt/openwrt
           submodules: recursive
 
-      - name: Install Dependencies
+      - name: Install Full Build System
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk \
             gettext git libelf-dev libncurses-dev libssl-dev python3 python3-pip \
-            zlib1g-dev libdeflate-dev gzip rsync unzip wget
+            zlib1g-dev libdeflate-dev gzip rsync unzip wget sed coreutils findutils
           pip3 install netifaces
 
-      - name: Fix Lua Extraction (Workaround)
+      - name: Prepare Host Tools
         run: |
-          # Force use of system gzip instead of libdeflate-gzip
+          # Create essential symlinks for host tools
           mkdir -p staging_dir/host/bin
-          ln -s /bin/gzip staging_dir/host/bin/libdeflate-gzip
+          ln -sf $(which sed) staging_dir/host/bin/sed
+          ln -sf $(which gzip) staging_dir/host/bin/libdeflate-gzip
+          ln -sf $(which install) staging_dir/host/bin/install
 
-      - name: Configure OpenWRT
+      - name: Configure and Build
         run: |
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-          echo "CONFIG_TARGET_bcm27xx=y" >> .config
-          echo "CONFIG_TARGET_bcm27xx_bcm2711=y" >> .config
-          echo "CONFIG_PACKAGE_modemmanager=y" >> .config
-          echo "CONFIG_PACKAGE_modemmanager-rpcd=y" >> .config
-          echo "CONFIG_PACKAGE_libqmi=y" >> .config
-          echo "CONFIG_PACKAGE_libmbim=y" >> .config
-          echo "CONFIG_PACKAGE_luci-proto-modemmanager=y" >> .config
+          
+          # Basic configuration
+          cat << EOF > .config
+          CONFIG_TARGET_bcm27xx=y
+          CONFIG_TARGET_bcm27xx_bcm2711=y
+          CONFIG_PACKAGE_modemmanager=y
+          CONFIG_PACKAGE_modemmanager-rpcd=y
+          CONFIG_PACKAGE_libqmi=y
+          CONFIG_PACKAGE_libmbim=y
+          CONFIG_PACKAGE_luci-proto-modemmanager=y
+          EOF
+          
           make defconfig
-
-      - name: Compile (Debug Mode)
-        run: |
-          make -j1 V=s package/utils/lua/host/compile || make -j1 V=s package/utils/lua/host/compile  # Build Lua first
+          
+          # Build host tools first
+          make -j1 V=s tools/install
+          make -j1 V=s toolchain/install
+          
+          # Then build packages
           make -j$(nproc) package/libqmi/compile
           make -j$(nproc) package/libmbim/compile
           make -j$(nproc) package/modemmanager/compile
           make -j$(nproc) package/modemmanager-rpcd/compile
           make -j$(nproc) package/luci-proto-modemmanager/compile
 
-      - name: Upload IPKs
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: modemmanager-ipks
-          path: bin/packages/*/base/*.ipk
+          name: modemmanager-packages
+          path: |
+            bin/packages/*/base/libqmi*.ipk
+            bin/packages/*/base/libmbim*.ipk
+            bin/packages/*/base/modemmanager*.ipk
+            bin/packages/*/base/luci-proto-modemmanager*.ipk
